@@ -79,11 +79,8 @@ async function stream(id: string) {
       if (data?.url) return { ...data, provider: "PencariMusic", fallback: false };
     } catch (_) {}
   }
-  const monoId = provider === "mono" ? trackId : trackId;
-  const data = await getJson(MONO + "/track/" + encodeURIComponent(monoId));
-  const streamUrl = typeof data === "string" ? data : (data?.url || data?.streamUrl || data?.stream_url);
-  if (!streamUrl) throw new Error("Monochrome did not return a stream URL");
-  return { url: streamUrl, mimeType: data?.mimeType || "audio/flac", bitDepth: data?.bitDepth || 16, sampleRate: data?.sampleRate || 44100, provider: "Monochrome", fallback: true };
+  const monoId = trackId;
+  return { url: MONO + "/track/" + encodeURIComponent(monoId), mimeType: "audio/flac", bitDepth: 16, sampleRate: 44100, provider: "Monochrome", fallback: true };
 }
 const MODULE = `(function () {
 'use strict';
