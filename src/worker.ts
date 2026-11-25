@@ -32,7 +32,7 @@ async function metadata(identifier: string): Promise<ArchiveMetadata> {
   return await r.json() as ArchiveMetadata;
 }
 async function search(q: string) {
-  const terms = q.toLowerCase().replace(/[^\\p{L}\\p{N} ]/gu, " ").split(/\\s+/).filter(Boolean).slice(0, 5);
+  const terms = q.toLowerCase().replace(/[^\p{L}\p{N} ]/gu, " ").split(/\s+/).filter(Boolean).slice(0, 5);
   if (!terms.length) return [];
   const clauses = terms.map(term => `(title:"${term}" OR creator:"${term}")`);
   const params = new URLSearchParams({ q: `mediatype:audio AND (${clauses.join(" AND ")})`, fl: "identifier,title,creator,year", rows: "50", page: "1", output: "json" });
@@ -52,7 +52,7 @@ async function search(q: string) {
         const creator = doc.creator;
         return {
           id: encodeTrackId(doc.identifier, file.name),
-          title: doc.title || file.name.replace(/\\.flac$/i, ""),
+          title: doc.title || file.name.replace(/\.flac$/i, ""),
           artist: Array.isArray(creator) ? creator.join(", ") : (creator || "Unknown Artist"),
           album: String(meta.metadata?.collection || doc.identifier),
           duration: durationSeconds(meta.metadata?.length),
