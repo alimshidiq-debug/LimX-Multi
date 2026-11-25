@@ -19,21 +19,28 @@ async function search(q: string) {
   if (!r.ok) throw new Error("Internet Archive search failed");
   const data = await r.json() as { response?: { docs?: ArchiveDoc[] } };
   const results: unknown[] = [];
-  for (const doc of (data.response?.docs || []).slice(0, 40)) {
-    try {
+  const docs = (data.response?.docs || []).slice(0, 40);
+  // Check metadata concurrently in small batches to avoid slow sequential requests.
+  for (let i = 0; i < docs.length; i += 8) {
+    const batch = await Promise.allSettled(docs.slice(i, i + 8).map(async (doc) => {
       const m = await metadata(doc.identifier);
       const license = String(m.metadata?.licenseurl || doc.licenseurl || "");
-      if (!allowed(license)) continue;
-      for (const f of (m.files || []).filter(flac).slice(0, 2)) {
-        results.push({
-          id: "ia:" + encodeURIComponent(doc.identifier) + ":" + encodeURIComponent(f.name),
-          title: doc.title || f.name, artist: Array.isArray(doc.creator) ? doc.creator.join(", ") : (doc.creator || "Unknown artist"),
-          album: doc.identifier, year: doc.year || null, provider: "Internet Archive", format: "FLAC",
-          license, attributionRequired: !license.toLowerCase().includes("publicdomain") && !license.toLowerCase().includes("/zero/"),
-          quality: quality(f)
-        });
-      }
-    } catch { /* Skip unavailable or malformed catalog entries. */ }
+      if (!allowed(license)) return [];
+      return (m.files || []).filter(flac).slice(0, 2).map((f) => ({
+        id: "ia:" + encodeURIComponent(doc.identifier) + ":" + encodeURIComponent(f.name),
+        title: doc.title || f.name,
+        artist: Array.isArray(doc.creator) ? doc.creator.join(", ") : (doc.creator || "Unknown artist"),
+        album: doc.identifier,
+        year: doc.year || null,
+        provider: "Internet Archive",
+        format: "FLAC",
+        license,
+        attributionRequired: !license.toLowerCase().includes("publicdomain") && !license.toLowerCase().includes("/zero/"),
+        quality: quality(f)
+      }));
+    }));
+    for (const item of batch) if (item.status === "fulfilled") results.push(...item.value);
+    if (results.length >= 20) break;
   }
   return results;
 }
