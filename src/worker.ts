@@ -12,13 +12,14 @@ async function metadata(identifier: string) {
   return await r.json() as { metadata?: Record<string, unknown>; files?: ArchiveFile[] };
 }
 async function search(q: string) {
-  const escaped = q.replace(/["\\]/g, " ").slice(0, 100);
-  const p = new URLSearchParams({ q: `mediatype:audio AND (title:"${escaped}" OR creator:"${escaped}")`, fl: "identifier,title,creator,year,licenseurl", rows: "15", page: "1", output: "json" });
+  const terms = q.toLowerCase().replace(/[^\\p{L}\\p{N} ]/gu, " ").split(/\\s+/).filter(Boolean).slice(0, 5);
+  const clauses = terms.map(term => `(title:${term} OR creator:${term})`);
+  const p = new URLSearchParams({ q: `mediatype:audio AND (${clauses.join(" AND ")})`, fl: "identifier,title,creator,year,licenseurl", rows: "50", page: "1", output: "json" });
   const r = await fetch("https://archive.org/advancedsearch.php?" + p);
   if (!r.ok) throw new Error("Internet Archive search failed");
   const data = await r.json() as { response?: { docs?: ArchiveDoc[] } };
   const results: unknown[] = [];
-  for (const doc of (data.response?.docs || []).slice(0, 10)) {
+  for (const doc of (data.response?.docs || []).slice(0, 40)) {
     try {
       const m = await metadata(doc.identifier);
       const license = String(m.metadata?.licenseurl || doc.licenseurl || "");
