@@ -12,7 +12,7 @@ async function metadata(identifier: string) {
   return await r.json() as { metadata?: Record<string, unknown>; files?: ArchiveFile[] };
 }
 async function search(q: string) {
-  const terms = q.toLowerCase().replace(/[^\\p{L}\\p{N} ]/gu, " ").split(/\\s+/).filter(Boolean).slice(0, 5);
+  const terms = q.toLowerCase().replace(/[^\p{L}\p{N} ]/gu, " ").split(/\s+/).filter(Boolean).slice(0, 5);
   const clauses = terms.map(term => `(title:${term} OR creator:${term})`);
   const p = new URLSearchParams({ q: `mediatype:audio AND (${clauses.join(" AND ")})`, fl: "identifier,title,creator,year,licenseurl", rows: "50", page: "1", output: "json" });
   const r = await fetch("https://archive.org/advancedsearch.php?" + p);
