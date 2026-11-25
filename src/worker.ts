@@ -131,7 +131,7 @@ export default {
       }
     }
     if (url.pathname.startsWith("/stream/")) {
-      const rawId = url.pathname.slice("/stream/".length);
+      const rawId = decodeURIComponent(url.pathname.slice("/stream/".length));
       if (rawId.startsWith("deezer:")) {
         const id = rawId.slice("deezer:".length);
         if (!/^\d+$/.test(id)) return json({ error: "Invalid Deezer track ID" }, 400);
