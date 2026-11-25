@@ -65,7 +65,7 @@ async function archiveSearch(q: string) {
     }));
     for (const b of batch) if (b.status === "fulfilled") tracks.push(...b.value);
   }
-  return tracks;
+  return tracks.sort((a, b) => (a.audioQuality === "HI_RES_LOSSLESS" ? 0 : 1) - (b.audioQuality === "HI_RES_LOSSLESS" ? 0 : 1));
 }
 export default {
   async fetch(request: Request): Promise<Response> {
@@ -74,8 +74,8 @@ export default {
     const url = new URL(request.url);
     if (url.pathname === "/" || url.pathname === "/health") return json({ status: "ok", service: "LimX Open Multi", provider: "Bandcamp + approved Internet Archive FLAC" });
     if (url.pathname === "/manifest.json") return json({
-      id: "com.limx.addon.openmulti", name: "LimX Open Multi", version: "1.2.0",
-      description: "Bandcamp-based music discovery with best-available legal audio; FLAC from approved open-license archives.",
+      id: "com.limx.addon.openmulti", name: "LimX Open Multi", version: "1.3.0",
+      description: "Bandcamp discovery with verified Hi-Res FLAC prioritized, followed by CD-quality FLAC from approved open-license archives.",
       author: "LimX", icon: "https://bandcamp.com/img/buttons/bandcamp-button-circle-black-32.png",
       resources: ["search", "stream", "settings"], types: ["track"], contentType: "music",
       settings: [{ key: "audio_quality", title: "Audio Quality", type: "select", default: "AVAILABLE", options: [
@@ -91,7 +91,7 @@ export default {
         const [bc, ia] = await Promise.allSettled([bandcampSearch(q), archiveSearch(q)]);
         const bandcamp = bc.status === "fulfilled" ? bc.value : [];
         const flac = ia.status === "fulfilled" ? ia.value : [];
-        return json({ tracks: [...flac, ...bandcamp], providers: { primary: "Bandcamp", lossless: "Internet Archive (approved licenses only)" }, warnings: bc.status === "rejected" ? ["Bandcamp search is temporarily unavailable; showing legal archive results if available."] : [] });
+        return json({ tracks: [...flac, ...bandcamp], qualityPriority: ["HI_RES_LOSSLESS", "LOSSLESS", "HIGH"], providers: { primary: "Bandcamp", lossless: "Internet Archive (approved licenses only)" }, warnings: bc.status === "rejected" ? ["Bandcamp search is temporarily unavailable; showing legal archive results if available."] : [] });
       } catch (e) { return json({ error: e instanceof Error ? e.message : "Search failed" }, 502); }
     }
     if (url.pathname.startsWith("/stream/")) {
