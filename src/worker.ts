@@ -3,7 +3,7 @@ interface ArchiveFile { name: string; format?: string; sample_rate?: string; bit
 const CORS = { "access-control-allow-origin": "*", "access-control-allow-methods": "GET, OPTIONS", "access-control-allow-headers": "Content-Type" };
 const LICENSES = ["creativecommons.org/publicdomain/zero/1.0/", "creativecommons.org/licenses/by/4.0/", "creativecommons.org/licenses/by/3.0/", "creativecommons.org/licenses/by-sa/4.0/", "creativecommons.org/licenses/by-sa/3.0/"];
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...CORS, "content-type": "application/json; charset=utf-8" } });
-const allowed = (license: string) => { const s = license.toLowerCase(); return s.includes("publicdomain") || LICENSES.some(x => s.includes(x)); };
+const allowed = (license: string) => { const s = license.toLowerCase(); return LICENSES.some(x => s.includes(x)); };
 const flac = (f: ArchiveFile) => f.name.toLowerCase().endsWith(".flac") || (f.format || "").toLowerCase().includes("flac");
 const quality = (f: ArchiveFile) => { const sampleRate = Number(f.sample_rate || 0) || null; const bitDepth = Number(f.bit_depth || 0) || null; return { codec: "FLAC", sampleRate, bitDepth, hiRes: (sampleRate || 0) >= 88200 || (bitDepth || 0) >= 24 }; };
 async function metadata(identifier: string) {
@@ -24,7 +24,7 @@ async function search(q: string) {
   for (let i = 0; i < docs.length; i += 8) {
     const batch = await Promise.allSettled(docs.slice(i, i + 8).map(async (doc) => {
       const m = await metadata(doc.identifier);
-      const license = String(m.metadata?.licenseurl || doc.licenseurl || "");
+      const license = String(m.metadata?.licenseurl || "");
       if (!allowed(license)) return [];
       return (m.files || []).filter(flac).slice(0, 2).map((f) => ({
         id: "ia:" + encodeURIComponent(doc.identifier) + ":" + encodeURIComponent(f.name),
