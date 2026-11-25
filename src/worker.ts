@@ -117,7 +117,7 @@ export default {
     if (request.method === "OPTIONS") return new Response(null, { headers: CORS });
     if (request.method !== "GET") return json({ error: "Method not allowed" }, 405);
     const url = new URL(request.url);
-    const path = url.pathname.replace(/^\\/music/, "") || "/";
+    const path = url.pathname.replace(/^\/music/, "") || "/";
     if (path === "/" || path === "/health") return json({ status: "ok", service: "LimX Music", primary: "PencariMusic", fallback: "Monochrome" });
     if (path === "/manifest.json") return json({
       id: "com.limx.openmulti.music",
