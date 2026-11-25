@@ -1,0 +1,10 @@
+[
+  {
+    "id": "limx-pencarimusic",
+    "name": "LimX PencariMusic Hi-Res",
+    "type": "pencarimusic",
+    "url": "https://stream.pencarimovie.com/66ff097863dedb7ccd8401d5ffe616f3/music",
+    "speed": "FLAC / Hi-Res when confirmed by source metadata",
+    "latency": "Unverified"
+  }
+]
