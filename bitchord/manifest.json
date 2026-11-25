@@ -1,0 +1,36 @@
+{
+  "id": "com.limx.openmulti.lossless",
+  "name": "LimX Open Multi",
+  "title": "LimX Open Multi",
+  "displayName": "LimX Open Multi",
+  "description": "Modular music discovery addon with PencariMusic FLAC source.",
+  "version": "1.0.0",
+  "logo": "https://raw.githubusercontent.com/alimshidiq-debug/LimX-Multi/main/bitchord/logo.svg",
+  "icon": "https://raw.githubusercontent.com/alimshidiq-debug/LimX-Multi/main/bitchord/logo.svg",
+  "checkValidLossless": 1,
+  "allowDownloads": 0,
+  "category:music": [
+    {
+      "id": "alimshidiq-limx-pencarimusic",
+      "name": "LimX PencariMusic Hi-Res",
+      "author": "LimX",
+      "version": "1.0.0",
+      "code": 5,
+      "type": "MODULE",
+      "download": "modules/pencarimusic.js",
+      "trusted": false,
+      "logo": "https://raw.githubusercontent.com/alimshidiq-debug/LimX-Multi/main/bitchord/logo.svg",
+      "icon": "https://raw.githubusercontent.com/alimshidiq-debug/LimX-Multi/main/bitchord/logo.svg",
+      "tags": [
+        "lossless",
+        "flac",
+        "hi-res"
+      ],
+      "labels": [
+        "lossless",
+        "flac",
+        "hi-res"
+      ]
+    }
+  ]
+}
