@@ -181,8 +181,35 @@ export default {
       return new Response(response.body, { status: response.status, headers: { ...Object.fromEntries(response.headers), "x-limx-cache": "MISS" } });
     }
     if (path.startsWith("/stream/")) {
-      try { return json(await stream(decodeURIComponent(path.slice("/stream/".length)))); }
-      catch (e) { return json({ error: e instanceof Error ? e.message : "Stream unavailable" }, 502); }
+      const id = decodeURIComponent(path.slice("/stream/".length));
+      const cache = caches.default;
+      const cacheKey = new Request(url.origin + "/music/stream-cache/" + encodeURIComponent(id), { method: "GET" });
+      const cached = await cache.match(cacheKey);
+      if (cached) {
+        return new Response(cached.body, {
+          status: cached.status,
+          headers: { ...Object.fromEntries(cached.headers), ...CORS, "x-limx-cache": "HIT" }
+        });
+      }
+      try {
+        const result = await stream(id);
+        const response = json(result, 200, "public, max-age=0, s-maxage=20");
+        if (result?.url) {
+          const stored = new Response(response.clone().body, {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "public, max-age=20"
+            }
+          });
+          await cache.put(cacheKey, stored);
+        }
+        return new Response(response.body, {
+          status: response.status,
+          headers: { ...Object.fromEntries(response.headers), "x-limx-cache": "MISS" }
+        });
+      } catch (e) {
+        return json({ error: e instanceof Error ? e.message : "Stream unavailable" }, 502);
+      }
     }
     return json({ error: "Not found" }, 404);
   }
