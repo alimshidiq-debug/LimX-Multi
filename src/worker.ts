@@ -1,10 +1,11 @@
 interface ArchiveDoc { identifier: string; title?: string; creator?: string | string[]; year?: string; }
 interface ArchiveFile { name: string; format?: string; sample_rate?: string; bit_depth?: string; size?: string; }
 interface ArchiveMetadata { metadata?: Record<string, unknown>; files?: ArchiveFile[]; }
+interface DeezerTrack { id: number; title: string; title_short?: string; artist?: { name?: string }; album?: { title?: string; cover_medium?: string }; duration?: number; preview?: string; }
 const CORS = { "access-control-allow-origin": "*", "access-control-allow-methods": "GET, OPTIONS", "access-control-allow-headers": "Content-Type" };
 const LICENSES = ["creativecommons.org/publicdomain/zero/1.0/", "creativecommons.org/licenses/by/4.0/", "creativecommons.org/licenses/by/3.0/", "creativecommons.org/licenses/by-sa/4.0/", "creativecommons.org/licenses/by-sa/3.0/"];
-const UPSTREAM_HEADERS = { "User-Agent": "LimX-Open-Multi/1.0 (BitChord audio provider)" };
-const DEFAULT_AUDIO_QUALITY = "LOSSLESS";
+const UPSTREAM_HEADERS = { "User-Agent": "LimX-Open-Multi/1.1 (BitChord audio provider)" };
+const DEFAULT_AUDIO_QUALITY = "AVAILABLE";
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...CORS, "content-type": "application/json; charset=utf-8", "cache-control": "no-store" } });
 const allowed = (license: string) => LICENSES.some(x => license.toLowerCase().includes(x));
 const isFlac = (f: ArchiveFile) => f.name.toLowerCase().endsWith(".flac") || (f.format || "").toLowerCase().includes("flac");
@@ -31,7 +32,26 @@ async function metadata(identifier: string): Promise<ArchiveMetadata> {
   if (!r.ok) throw new Error("Internet Archive metadata request failed (" + r.status + ")");
   return await r.json() as ArchiveMetadata;
 }
-async function search(q: string) {
+async function searchDeezer(q: string) {
+  const endpoint = "https://api.deezer.com/search?" + new URLSearchParams({ q, limit: "25" });
+  const r = await fetch(endpoint, { headers: UPSTREAM_HEADERS });
+  if (!r.ok) throw new Error("Deezer search failed (" + r.status + ")");
+  const data = await r.json() as { data?: DeezerTrack[]; error?: { message?: string } };
+  if (data.error) throw new Error(data.error.message || "Deezer API error");
+  return (data.data || []).filter(t => t.id && t.preview).map(t => ({
+    id: "deezer:" + t.id,
+    title: t.title,
+    artist: t.artist?.name || "Unknown Artist",
+    album: t.album?.title || "",
+    duration: Math.min(30, Number(t.duration || 30)),
+    artworkURL: t.album?.cover_medium || "",
+    format: "mp3",
+    audioQuality: "HIGH",
+    isPreview: true,
+    provider: "Deezer"
+  }));
+}
+async function searchArchive(q: string) {
   const terms = q.toLowerCase().replace(/[^\p{L}\p{N} ]/gu, " ").split(/\s+/).filter(Boolean).slice(0, 5);
   if (!terms.length) return [];
   const clauses = terms.map(term => `(title:"${term}" OR creator:"${term}")`);
@@ -58,51 +78,75 @@ async function search(q: string) {
           duration: durationSeconds(meta.metadata?.length),
           artworkURL: "https://archive.org/services/img/" + encodeURIComponent(doc.identifier),
           format: "flac",
-          audioQuality: qInfo.audioQuality
+          audioQuality: qInfo.audioQuality,
+          provider: "Internet Archive"
         };
       });
     }));
     for (const result of batch) if (result.status === "fulfilled") tracks.push(...result.value);
-    if (tracks.length >= 30) break;
+    if (tracks.length >= 20) break;
   }
-  return tracks.slice(0, 30);
+  return tracks.slice(0, 20);
 }
 export default {
   async fetch(request: Request): Promise<Response> {
     if (request.method === "OPTIONS") return new Response(null, { headers: CORS });
     if (request.method !== "GET") return json({ error: "Method not allowed" }, 405);
     const url = new URL(request.url);
-    if (url.pathname === "/" || url.pathname === "/health") return json({ status: "ok", service: "LimX Open Multi", provider: "Internet Archive" });
+    if (url.pathname === "/" || url.pathname === "/health") return json({ status: "ok", service: "LimX Open Multi", provider: "Deezer + licensed Internet Archive FLAC" });
     if (url.pathname === "/manifest.json") return json({
       id: "com.limx.addon.openmulti",
       name: "LimX Open Multi",
-      version: "1.0.0",
-      description: "Open-license FLAC music provider powered by Internet Archive.",
+      version: "1.1.0",
+      description: "Deezer-based music search with best-available legal audio quality and licensed FLAC sources.",
       author: "LimX",
-      icon: "https://archive.org/images/glogo.jpg",
+      icon: "https://e-cdns-images.dzcdn.net/images/cover/00000000000000000000000000000000/250x250-000000-80-0-0.jpg",
       resources: ["search", "stream", "settings"],
       types: ["track"],
       contentType: "music",
       settings: [{
         key: "audio_quality",
-        title: "Preferred Audio Quality",
+        title: "Audio Quality",
         type: "select",
         default: DEFAULT_AUDIO_QUALITY,
         options: [
-          { label: "Lossless FLAC", value: "LOSSLESS" },
-          { label: "Hi-Res Lossless (verified metadata only)", value: "HI_RES_LOSSLESS" }
+          { label: "Best Available (FLAC when legally available)", value: "AVAILABLE" },
+          { label: "Lossless FLAC only", value: "LOSSLESS" },
+          { label: "Hi-Res Lossless only (verified metadata)", value: "HI_RES_LOSSLESS" }
         ]
       }]
     });
     if (url.pathname === "/search") {
       const q = (url.searchParams.get("q") || "").trim();
       if (!q) return json({ error: 'Query parameter "q" is required.' }, 400);
-      try { return json({ tracks: await search(q) }); }
-      catch (error) { return json({ error: error instanceof Error ? error.message : "Search failed" }, 502); }
+      try {
+        const [deezer, archive] = await Promise.allSettled([searchDeezer(q), searchArchive(q)]);
+        const tracks = [
+          ...(archive.status === "fulfilled" ? archive.value : []),
+          ...(deezer.status === "fulfilled" ? deezer.value : [])
+        ];
+        return json({ tracks, providers: { primary: "Deezer", lossless: "Internet Archive (approved licenses only)" } });
+      } catch (error) {
+        return json({ error: error instanceof Error ? error.message : "Search failed" }, 502);
+      }
     }
     if (url.pathname.startsWith("/stream/")) {
+      const rawId = url.pathname.slice("/stream/".length);
+      if (rawId.startsWith("deezer:")) {
+        const id = rawId.slice("deezer:".length);
+        if (!/^\d+$/.test(id)) return json({ error: "Invalid Deezer track ID" }, 400);
+        try {
+          const r = await fetch("https://api.deezer.com/track/" + id, { headers: UPSTREAM_HEADERS });
+          if (!r.ok) return json({ error: "Deezer track lookup failed (" + r.status + ")" }, 502);
+          const track = await r.json() as DeezerTrack;
+          if (!track.preview) return json({ error: "No free preview is available for this track" }, 404);
+          return json({ url: track.preview, format: "mp3", quality: "HIGH", mimeType: "audio/mpeg", manifest: "none", encrypted: false, sampleRate: null, bitDepth: null, headers: {}, isPreview: true, previewDuration: 30 });
+        } catch (error) {
+          return json({ error: error instanceof Error ? error.message : "Unable to resolve Deezer preview" }, 502);
+        }
+      }
       try {
-        const { identifier, filename } = decodeTrackId(url.pathname.slice("/stream/".length));
+        const { identifier, filename } = decodeTrackId(rawId);
         const meta = await metadata(identifier);
         const license = String(meta.metadata?.licenseurl || "");
         if (!allowed(license)) return json({ error: "Item license is not approved" }, 403);
