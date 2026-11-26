@@ -77,31 +77,61 @@ function parseConfih(t: any) {
   };
 }
 async function search(q: string, limit: number) {
-  const results = await Promise.allSettled([
-    (async () => {
-      const rows = rowsOf(await getJson(PM + "/search?q=" + encodeURIComponent(q), 4500));
-      return rows.filter((t: any) => t && t.id != null && t.title).slice(0, limit).map(parsePM);
-    })(),
-    (async () => {
-      const rows = rowsOf(await getJson(MONO + "/search/tracks?q=" + encodeURIComponent(q) + "&limit=" + limit, 4500));
-      return rows.filter((t: any) => t && (t.id != null || t.trackId != null) && (t.title || t.name) && t.playable !== false).slice(0, limit).map(parseMono);
-    })(),
-    (async () => {
-      const data = await getJson(CONFih + "/search?q=" + encodeURIComponent(q) + "&quality=max", 5000);
-      return rowsOf(data).filter((t: any) => t && (t.id != null || t.track_id != null || t.trackId != null || t.qobuz_id != null) && (t.title || t.name)).slice(0, limit).map(parseConfih);
-    })()
-  ]);
-  const tracks: any[] = [];
-  const providers: string[] = [];
-  for (const result of results) {
-    if (result.status === "fulfilled" && result.value.length) {
-      tracks.push(...result.value);
-      const name = String(result.value[0].provider || "");
-      if (name && !providers.includes(name)) providers.push(name);
+  // Provider priority: Confih is primary; use PencariMusic, then Monochrome
+  // only when the higher-priority provider is unavailable or returns no tracks.
+  const providers = [
+    {
+      name: "Confih",
+      run: async () => {
+        const data = await getJson(CONFih + "/search?q=" + encodeURIComponent(q) + "&quality=max", 6000);
+        return rowsOf(data)
+          .filter((t: any) => t && (t.id != null || t.track_id != null || t.trackId != null || t.qobuz_id != null) && (t.title || t.name))
+          .slice(0, limit)
+          .map(parseConfih);
+      }
+    },
+    {
+      name: "PencariMusic",
+      run: async () => {
+        const rows = rowsOf(await getJson(PM + "/search?q=" + encodeURIComponent(q), 5000));
+        return rows.filter((t: any) => t && t.id != null && t.title).slice(0, limit).map(parsePM);
+      }
+    },
+    {
+      name: "Monochrome",
+      run: async () => {
+        const rows = rowsOf(await getJson(MONO + "/search/tracks?q=" + encodeURIComponent(q) + "&limit=" + limit, 5000));
+        return rows.filter((t: any) => t && (t.id != null || t.trackId != null) && (t.title || t.name) && t.playable !== false).slice(0, limit).map(parseMono);
+      }
+    }
+  ];
+
+  const errors: string[] = [];
+  for (const provider of providers) {
+    try {
+      const tracks = await provider.run();
+      if (tracks.length) {
+        return {
+          tracks: tracks.slice(0, limit),
+          total: tracks.length,
+          providers: [provider.name],
+          primaryProvider: "Confih",
+          activeProvider: provider.name,
+          fallbackUsed: provider.name !== "Confih"
+        };
+      }
+    } catch (error) {
+      errors.push(provider.name + ": " + (error instanceof Error ? error.message : "request failed"));
     }
   }
-  if (!tracks.length) return { tracks: [], total: 0, providers: [], error: "Providers unavailable or authentication required." };
-  return { tracks: tracks.slice(0, limit * 3), total: Math.min(tracks.length, limit * 3), providers };
+  return {
+    tracks: [],
+    total: 0,
+    providers: [],
+    primaryProvider: "Confih",
+    fallbackUsed: true,
+    error: errors.length ? errors.join("; ") : "No tracks found from Confih or fallback providers."
+  };
 }
 async function stream(id: string, quality = "max") {
   const [provider, ...rest] = id.split("::");
