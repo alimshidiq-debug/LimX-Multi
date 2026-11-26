@@ -133,6 +133,71 @@ async function search(q: string, limit: number) {
     error: errors.length ? errors.join("; ") : "No tracks found from Confih or fallback providers."
   };
 }
+async function diagnoseProvider(name: string, endpoint: string, parser: (data: any) => any[]) {
+  const started = Date.now();
+  try {
+    const response = await fetch(endpoint, {
+      headers: { "Accept": "application/json", "User-Agent": UA },
+      redirect: "follow",
+      signal: AbortSignal.timeout(8000)
+    });
+    const contentType = response.headers.get("content-type") || "";
+    const bodyText = await response.text();
+    let data: any;
+    try {
+      data = JSON.parse(bodyText);
+    } catch {
+      return {
+        provider: name,
+        ok: false,
+        httpStatus: response.status,
+        contentType,
+        elapsedMs: Date.now() - started,
+        error: "Response is not valid JSON",
+        responsePreview: bodyText.slice(0, 240)
+      };
+    }
+    if (!response.ok) {
+      return {
+        provider: name,
+        ok: false,
+        httpStatus: response.status,
+        contentType,
+        elapsedMs: Date.now() - started,
+        error: "Upstream HTTP " + response.status,
+        responseKeys: data && typeof data === "object" ? Object.keys(data).slice(0, 30) : []
+      };
+    }
+    const rawRows = rowsOf(data);
+    const parsedRows = parser(data);
+    const sample = rawRows[0];
+    return {
+      provider: name,
+      ok: true,
+      httpStatus: response.status,
+      contentType,
+      elapsedMs: Date.now() - started,
+      topLevelKeys: data && typeof data === "object" && !Array.isArray(data) ? Object.keys(data).slice(0, 30) : [],
+      rawTrackCount: rawRows.length,
+      compatibleTrackCount: parsedRows.length,
+      sampleTrackKeys: sample && typeof sample === "object" ? Object.keys(sample).slice(0, 40) : [],
+      sampleTrack: sample ? {
+        id: sample.id ?? sample.track_id ?? sample.trackId ?? sample.qobuz_id ?? null,
+        title: sample.title ?? sample.name ?? null,
+        artist: sample.artist ?? sample.artist_name ?? null
+      } : null,
+      note: rawRows.length && !parsedRows.length ? "API returned tracks, but current LimX parser did not recognize their fields." : undefined
+    };
+  } catch (error) {
+    return {
+      provider: name,
+      ok: false,
+      elapsedMs: Date.now() - started,
+      error: error instanceof Error ? error.message : "Request failed"
+    };
+  }
+}
+
 async function stream(id: string, quality = "max") {
   const [provider, ...rest] = id.split("::");
   const trackId = decodeURIComponent(rest.join("::"));
@@ -238,6 +303,28 @@ export default {
     if (path === "/modules/pencarimusic.js") return new Response(MODULE, {
       headers: { ...CORS, "content-type": "application/javascript; charset=utf-8", "cache-control": "public, max-age=300" }
     });
+    if (path === "/debug/providers") {
+      const q = (url.searchParams.get("q") || "").trim();
+      if (!q) return json({ error: 'Query parameter "q" is required.' }, 400);
+      const encoded = encodeURIComponent(q);
+      const checks = await Promise.all([
+        diagnoseProvider("Confih", CONFih + "/search?q=" + encoded + "&quality=max", (data) =>
+          rowsOf(data).filter((t: any) => t && (t.id != null || t.track_id != null || t.trackId != null || t.qobuz_id != null) && (t.title || t.name))
+        ),
+        diagnoseProvider("PencariMusic", PM + "/search?q=" + encoded, (data) =>
+          rowsOf(data).filter((t: any) => t && t.id != null && t.title)
+        ),
+        diagnoseProvider("Monochrome", MONO + "/search/tracks?q=" + encoded + "&limit=5", (data) =>
+          rowsOf(data).filter((t: any) => t && (t.id != null || t.trackId != null) && (t.title || t.name) && t.playable !== false)
+        )
+      ]);
+      return json({
+        query: q,
+        primaryProvider: "Confih",
+        fallbackOrder: ["PencariMusic", "Monochrome"],
+        diagnostics: checks
+      });
+    }
     if (path === "/search") {
       const q = (url.searchParams.get("q") || "").trim();
       const limit = Math.max(1, Math.min(30, Number(url.searchParams.get("limit")) || 15));
