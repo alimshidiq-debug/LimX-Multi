@@ -201,7 +201,7 @@ export default {
         return json({ error: "Unsupported quality. Use max, lossless, high, or low." }, 400);
       }
       const cache = caches.default;
-      const cacheKey = new Request(url.origin + "/music/stream-cache/" + encodeURIComponent(id), { method: "GET" });
+      const cacheKey = new Request(url.origin + "/music/stream-cache/" + encodeURIComponent(id) + "?quality=" + requestedQuality, { method: "GET" });
       const cached = await cache.match(cacheKey);
       if (cached) {
         return new Response(cached.body, {
