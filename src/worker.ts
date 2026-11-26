@@ -106,9 +106,11 @@ async function searchTracks(text, limit) {
     return { tracks: data.tracks || [], total: data.total || 0 };
   } catch (_) { return { tracks: [], total: 0 }; }
 }
-async function getTrackStreamUrl(id) {
+async function getTrackStreamUrl(id, quality) {
   try {
-    var data = await req('/stream/' + encodeURIComponent(String(id)));
+    var selectedQuality = String(quality || 'max').toLowerCase();
+    if (['max', 'lossless', 'high', 'low'].indexOf(selectedQuality) === -1) selectedQuality = 'max';
+    var data = await req('/stream/' + encodeURIComponent(String(id)) + '?quality=' + encodeURIComponent(selectedQuality));
     if (!data.url) return null;
     var quality = data.audioQuality || 'UNKNOWN';
     return { streamUrl: data.url, track: {
