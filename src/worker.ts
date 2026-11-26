@@ -5,6 +5,7 @@ const CORS = {
 };
 const PM = "https://stream.pencarimovie.com/66ff097863dedb7ccd8401d5ffe616f3/music";
 const MONO = "https://tracks.monochrome.st";
+const CONFih = "https://bitchord.confih.tech";
 const UA = "Mozilla/5.0 (compatible; LimX-Open-Multi/2.1)";
 const SEARCH_TTL = 90;
 
@@ -59,22 +60,50 @@ function parseMono(t: any) {
     provider: "Monochrome"
   };
 }
-async function search(q: string, limit: number) {
-  try {
-    const pm = rowsOf(await getJson(PM + "/search?q=" + encodeURIComponent(q), 4000));
-    const valid = pm.filter((t: any) => t && t.id != null && t.title).slice(0, limit).map(parsePM);
-    if (valid.length) return { tracks: valid, total: valid.length, provider: "PencariMusic" };
-  } catch (_) {}
-  try {
-    const mono = rowsOf(await getJson(MONO + "/search/tracks?q=" + encodeURIComponent(q) + "&limit=" + limit, 4000));
-    const valid = mono.filter((t: any) => t && (t.id != null || t.trackId != null) && (t.title || t.name) && t.playable !== false)
-      .slice(0, limit).map(parseMono);
-    return { tracks: valid, total: valid.length, provider: "Monochrome", fallback: true };
-  } catch (_) {
-    return { tracks: [], total: 0, provider: null, error: "Music providers timed out or are unavailable." };
-  }
+function parseConfih(t: any) {
+  const rawId = t.id ?? t.track_id ?? t.trackId ?? t.qobuz_id;
+  const duration = Number(t.duration) || 0;
+  const artists = Array.isArray(t.artists) ? t.artists.map((a: any) => typeof a === "string" ? a : a?.name).filter(Boolean).join(", ") : (t.artist || t.artist_name || "");
+  return {
+    id: "confih::" + encodeURIComponent(String(rawId)),
+    title: String(t.title || t.name || ""),
+    artist: String(artists),
+    album: String(t.album?.title || t.album_title || t.album || ""),
+    albumCover: t.album?.image || t.album?.cover || t.cover || t.artwork || t.thumbnail || null,
+    duration: Math.round(duration > 10000 ? duration / 1000 : duration),
+    audioQuality: String(t.audioQuality || t.audio_quality || t.quality || "UNKNOWN"),
+    format: String(t.format || "unknown"),
+    provider: "Confih"
+  };
 }
-async function stream(id: string) {
+async function search(q: string, limit: number) {
+  const results = await Promise.allSettled([
+    (async () => {
+      const rows = rowsOf(await getJson(PM + "/search?q=" + encodeURIComponent(q), 4500));
+      return rows.filter((t: any) => t && t.id != null && t.title).slice(0, limit).map(parsePM);
+    })(),
+    (async () => {
+      const rows = rowsOf(await getJson(MONO + "/search/tracks?q=" + encodeURIComponent(q) + "&limit=" + limit, 4500));
+      return rows.filter((t: any) => t && (t.id != null || t.trackId != null) && (t.title || t.name) && t.playable !== false).slice(0, limit).map(parseMono);
+    })(),
+    (async () => {
+      const data = await getJson(CONFih + "/search?q=" + encodeURIComponent(q) + "&quality=max", 5000);
+      return rowsOf(data).filter((t: any) => t && (t.id != null || t.track_id != null || t.trackId != null || t.qobuz_id != null) && (t.title || t.name)).slice(0, limit).map(parseConfih);
+    })()
+  ]);
+  const tracks: any[] = [];
+  const providers: string[] = [];
+  for (const result of results) {
+    if (result.status === "fulfilled" && result.value.length) {
+      tracks.push(...result.value);
+      const name = String(result.value[0].provider || "");
+      if (name && !providers.includes(name)) providers.push(name);
+    }
+  }
+  if (!tracks.length) return { tracks: [], total: 0, providers: [], error: "Providers unavailable or authentication required." };
+  return { tracks: tracks.slice(0, limit * 3), total: Math.min(tracks.length, limit * 3), providers };
+}
+async function stream(id: string, quality = "max") {
   const [provider, ...rest] = id.split("::");
   const trackId = decodeURIComponent(rest.join("::"));
   if (!trackId || trackId.includes("..")) throw new Error("Invalid track ID");
@@ -82,6 +111,11 @@ async function stream(id: string) {
     const data = await getJson(PM + "/stream/" + encodeURIComponent(trackId), 7000);
     if (data?.url) return { ...data, provider: "PencariMusic", fallback: false };
     throw new Error("PencariMusic did not return a stream URL.");
+  }
+  if (provider === "confih") {
+    const data = await getJson(CONFih + "/stream/" + encodeURIComponent(trackId) + "?quality=" + encodeURIComponent(quality), 8000);
+    if (data?.url || data?.streamUrl) return { ...data, url: data.url || data.streamUrl, provider: "Confih", fallback: false };
+    throw new Error("Confih did not return a stream URL.");
   }
   if (provider === "mono") {
     return {
@@ -131,13 +165,13 @@ export default {
     if (request.method !== "GET") return json({ error: "Method not allowed" }, 405);
     const url = new URL(request.url);
     const path = url.pathname.replace(/^\/music/, "") || "/";
-    if (path === "/" || path === "/health") return json({ status: "ok", service: "LimX Music", version: "2.1.0", primary: "PencariMusic", fallback: "Monochrome" });
+    if (path === "/" || path === "/health") return json({ status: "ok", service: "LimX Music", version: "2.2.0", providers: ["PencariMusic", "Monochrome", "Confih"] });
     if (path === "/manifest.json") return json({
       id: "com.limx.openmulti.music",
       name: "LimX Open Multi",
       title: "LimX Open Multi",
       displayName: "LimX Open Multi",
-      description: "Multi-provider music search and stream with quality preference settings.",
+      description: "Combined PencariMusic, Monochrome and Confih music search and streaming.",
       version: "2.1.0",
       logo: "https://raw.githubusercontent.com/alimshidiq-debug/LimX-Multi/main/bitchord/logo.svg",
       icon: "https://raw.githubusercontent.com/alimshidiq-debug/LimX-Multi/main/bitchord/logo.svg",
@@ -158,7 +192,7 @@ export default {
       }],
       "category:music": [{
         id: "alimshidiq-limx-pencarimusic",
-        name: "LimX PencariMusic + Monochrome",
+        name: "LimX Multi (PencariMusic + Monochrome + Confih)",
         author: "LimX",
         version: "2.1.0",
         code: 5,
@@ -167,7 +201,7 @@ export default {
         trusted: false,
         logo: "https://raw.githubusercontent.com/alimshidiq-debug/LimX-Multi/main/bitchord/logo.svg",
         icon: "https://raw.githubusercontent.com/alimshidiq-debug/LimX-Multi/main/bitchord/logo.svg",
-        tags: ["music", "search", "stream"],
+        tags: ["music", "search", "stream", "multi-provider", "confih"],
         labels: ["music", "search", "stream"]
       }]
     });
@@ -212,7 +246,7 @@ export default {
         });
       }
       try {
-        const result = await stream(id);
+        const result = await stream(id, requestedQuality);
         // Preference is recorded for future provider-specific negotiation.
         // Never claim requested quality unless the upstream confirms it.
         const response = json({ ...result, requestedQuality }, 200, "public, max-age=0, s-maxage=20");
