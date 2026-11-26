@@ -135,12 +135,25 @@ export default {
       name: "LimX Open Multi",
       title: "LimX Open Multi",
       displayName: "LimX Open Multi",
-      description: "PencariMusic primary with Monochrome fallback.",
+      description: "Multi-provider music search and stream with quality preference settings.",
       version: "2.1.0",
       logo: "https://raw.githubusercontent.com/alimshidiq-debug/LimX-Multi/main/bitchord/logo.svg",
       icon: "https://raw.githubusercontent.com/alimshidiq-debug/LimX-Multi/main/bitchord/logo.svg",
+      resources: ["search", "stream"],
       checkValidLossless: 0,
       allowDownloads: 0,
+      settings: [{
+        key: "quality",
+        type: "select",
+        label: "Audio quality preference",
+        default: "max",
+        options: [
+          { value: "max", label: "Maximum available quality" },
+          { value: "lossless", label: "Lossless when available" },
+          { value: "high", label: "High quality" },
+          { value: "low", label: "Data saver" }
+        ]
+      }],
       "category:music": [{
         id: "alimshidiq-limx-pencarimusic",
         name: "LimX PencariMusic + Monochrome",
@@ -182,6 +195,11 @@ export default {
     }
     if (path.startsWith("/stream/")) {
       const id = decodeURIComponent(path.slice("/stream/".length));
+      const requestedQuality = url.searchParams.get("quality") || "max";
+      const allowedQualities = new Set(["max", "lossless", "high", "low"]);
+      if (!allowedQualities.has(requestedQuality)) {
+        return json({ error: "Unsupported quality. Use max, lossless, high, or low." }, 400);
+      }
       const cache = caches.default;
       const cacheKey = new Request(url.origin + "/music/stream-cache/" + encodeURIComponent(id), { method: "GET" });
       const cached = await cache.match(cacheKey);
@@ -193,7 +211,9 @@ export default {
       }
       try {
         const result = await stream(id);
-        const response = json(result, 200, "public, max-age=0, s-maxage=20");
+        // Preference is recorded for future provider-specific negotiation.
+        // Never claim requested quality unless the upstream confirms it.
+        const response = json({ ...result, requestedQuality }, 200, "public, max-age=0, s-maxage=20");
         if (result?.url) {
           const stored = new Response(response.clone().body, {
             headers: {
